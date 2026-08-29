@@ -1,0 +1,183 @@
+---
+title: "Quantium Task 1 - Data Analysis"
+author: "Sushant Kumar Yadav"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+## Load libraries
+
+```{r load-lib}
+# -------------- LOAD LIBRARIES -----------------
+library(data.table)
+library(readxl)
+library(ggplot2)
+library(lubridate)
+library(readr)
+library(stringr)
+```
+
+# TASK 1: DATA LOADING & CLEANING 
+
+##Load data
+```{r load-data}
+
+transactionData <- as.data.table(read_excel("QVI_transaction_data.xlsx"))
+customerData <- fread("QVI_purchase_behaviour.csv")
+```
+
+## Clean transaction data
+
+```{r clean }
+
+
+transactionData[, DATE := as.Date(DATE, origin = "1899-12-30")]
+transactionData <- transactionData[!grepl("salsa", tolower(PROD_NAME))]
+transactionData <- transactionData[PROD_QTY != 200]
+transactionData[, PACK_SIZE := parse_number(PROD_NAME)]
+transactionData[, BRAND := word(PROD_NAME, 1)]
+transactionData[BRAND == "RED", BRAND := "RRD"]
+transactionData[BRAND == "Natural", BRAND := "NCC"]
+
+# Merge with customer data
+names(customerData)[1] <- "LYLTY_CARD_NBR"
+data <- merge(transactionData, customerData, by = "LYLTY_CARD_NBR", all.x = TRUE)
+```
+
+#  TOTAL SALES BY SEGMENT 
+
+```{r total sales }
+# Aggregate
+sales_by_seg <- aggregate(TOT_SALES ~ LIFESTAGE + PREMIUM_CUSTOMER, data = data, FUN = sum)
+sales_by_seg <- sales_by_seg[order(-sales_by_seg$TOT_SALES), ]
+
+# Console table
+cat("\n===== TOTAL SALES BY SEGMENT =====\n")
+print(sales_by_seg)
+
+# Clean chart with 90° rotated labels
+p1 <- ggplot(sales_by_seg, aes(x = LIFESTAGE, y = TOT_SALES, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  labs(title = "Total Sales by Segment", y = "Total Sales ($)", x = "Lifestage") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+    plot.margin = margin(b = 20, l = 10, r = 10, t = 10),
+    legend.position = "top"
+  )
+print(p1)
+ggsave("01_total_sales_by_segment.png", p1, width = 12, height = 7, dpi = 300)
+```
+
+#   NUMBER OF CUSTOMERS BY SEGMENT 
+
+```{r total customers }
+# Aggregate unique customers
+cust_count <- aggregate(LYLTY_CARD_NBR ~ LIFESTAGE + PREMIUM_CUSTOMER, 
+                        data = data, FUN = function(x) length(unique(x)))
+names(cust_count)[3] <- "CUSTOMER_COUNT"
+cust_count <- cust_count[order(-cust_count$CUSTOMER_COUNT), ]
+
+# Console table
+cat("\n===== NUMBER OF CUSTOMERS BY SEGMENT =====\n")
+print(cust_count)
+
+# Clean chart
+p2 <- ggplot(cust_count, aes(x = LIFESTAGE, y = CUSTOMER_COUNT, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  labs(title = "Number of Customers by Segment", y = "Number of Customers", x = "Lifestage") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+    plot.margin = margin(b = 20, l = 10, r = 10, t = 10),
+    legend.position = "top"
+  )
+print(p2)
+ggsave("02_customer_count_by_segment.png", p2, width = 12, height = 7, dpi = 300)
+```
+#   AVERAGE PRICE PER UNIT BY SEGMENT 
+
+```{r average }
+# Calculate unit price
+data[, UNIT_PRICE := TOT_SALES / PROD_QTY]
+
+# Aggregate average price
+avg_price <- aggregate(UNIT_PRICE ~ LIFESTAGE + PREMIUM_CUSTOMER, data = data, FUN = mean)
+avg_price <- avg_price[order(-avg_price$UNIT_PRICE), ]
+
+# Console table (round only numeric column)
+avg_price_print <- avg_price
+avg_price_print$UNIT_PRICE <- round(avg_price_print$UNIT_PRICE, 2)
+cat("\n===== AVERAGE PRICE PER UNIT BY SEGMENT =====\n")
+print(avg_price_print)
+
+# Clean chart
+p3 <- ggplot(avg_price, aes(x = LIFESTAGE, y = UNIT_PRICE, fill = PREMIUM_CUSTOMER)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
+  labs(title = "Average Price per Unit by Segment", y = "Average Price ($)", x = "Lifestage") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+    plot.margin = margin(b = 20, l = 10, r = 10, t = 10),
+    legend.position = "top"
+  )
+print(p3)
+ggsave("03_avg_price_by_segment.png", p3, width = 12, height = 7, dpi = 300)
+```
+
+# Deep dive: Mainstream Young Singles/Couples
+
+```{r target}
+# Filter target segment
+target <- data[LIFESTAGE == "YOUNG SINGLES/COUPLES" & PREMIUM_CUSTOMER == "Mainstream", ]
+
+# Top 10 Brands
+brand_sales <- aggregate(TOT_SALES ~ BRAND, data = target, FUN = sum)
+brand_sales <- brand_sales[order(-brand_sales$TOT_SALES), ]
+top_brands <- head(brand_sales, 10)
+
+cat("\n===== TOP 10 BRANDS: MAINSTREAM YOUNG SINGLES/COUPLES =====\n")
+print(top_brands)
+
+p4 <- ggplot(top_brands, aes(x = reorder(BRAND, -TOT_SALES), y = TOT_SALES)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Top 10 Brands for Mainstream Young Singles/Couples", x = "Brand", y = "Total Sales ($)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+print(p4)
+ggsave("04_top_brands_mainstream_young.png", p4, width = 10, height = 6, dpi = 300)
+
+# Top 5 Pack Sizes
+pack_sales <- aggregate(TOT_SALES ~ PACK_SIZE, data = target, FUN = sum)
+pack_sales <- pack_sales[order(-pack_sales$TOT_SALES), ]
+top_packs <- head(pack_sales, 5)
+
+cat("\n===== TOP 5 PACK SIZES: MAINSTREAM YOUNG SINGLES/COUPLES =====\n")
+print(top_packs)
+
+p5 <- ggplot(top_packs, aes(x = factor(PACK_SIZE), y = TOT_SALES)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  labs(title = "Top 5 Pack Sizes for Mainstream Young Singles/Couples", x = "Pack Size (g)", y = "Total Sales ($)") +
+  theme_bw()
+print(p5)
+ggsave("05_top_pack_sizes_mainstream_young.png", p5, width = 8, height = 5, dpi = 300)
+```
+
+# T-test for price difference (Mainstream vs Non-Mainstream in Singles/Couples lifestages)
+
+```{r ttest}
+
+
+test_data <- data[LIFESTAGE %in% c("YOUNG SINGLES/COUPLES", "MIDAGE SINGLES/COUPLES"), ]
+mainstream_prices <- test_data[PREMIUM_CUSTOMER == "Mainstream", UNIT_PRICE]
+non_mainstream_prices <- test_data[PREMIUM_CUSTOMER != "Mainstream", UNIT_PRICE]
+t_test_result <- t.test(mainstream_prices, non_mainstream_prices)
+
+cat("\n===== T-TEST: UNIT PRICE (MAINSTREAM VS NON-MAINSTREAM) =====\n")
+print(t_test_result)
+```
